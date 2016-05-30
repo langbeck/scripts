@@ -1,0 +1,50 @@
+#!/bin/bash
+set -e
+
+if [ $UID -ne 0 ]; then
+  echo 'You must be root'
+  exit 1
+fi
+
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <src-bridge> <dst-bridge>"
+  exit 1
+fi
+
+is_br() { ! brctl show | awk "/^\\s/{next} NR>1 && match(\$0, /^$1\\s/){exit 1}"; }
+is_ovs() { ovs-vsctl list-br | awk "!/^$1\$/{exit 1}"; }
+
+ovs_listports() { ovs-vsctl list-ports "$1"; }
+ovs_delport() { ovs-vsctl del-port "$1" "$2"; }
+ovs_addport() { ovs-vsctl add-port "$1" "$2"; }
+
+br_listports() { brctl show "$1" | awk 'NR==2&&NF!=4{exit} NR>1{print $NF}'; }
+br_delport() { brctl delif "$1" "$2"; }
+br_addport() { brctl addif "$1" "$2"; }
+
+
+SRC_BRIDGE="$1"
+DST_BRIDGE="$2"
+
+bridge_type() {
+  if is_ovs "$1"; then
+    echo 'ovs'
+  else
+    if is_br "$1"; then
+      echo 'br'
+    else
+      echo >&2 "Invalid bridge: $1"
+      exit 2
+    fi
+  fi
+}
+
+
+SRC_TYPE=$(bridge_type "$SRC_BRIDGE")
+DST_TYPE=$(bridge_type "$DST_BRIDGE")
+
+for port in $(${SRC_TYPE}_listports "$SRC_BRIDGE"); do
+  ${SRC_TYPE}_delport "$SRC_BRIDGE" "$port"
+  ${DST_TYPE}_addport "$DST_BRIDGE" "$port"
+  echo "$port"
+done
